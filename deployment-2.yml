@@ -1,0 +1,76 @@
+resources:
+- name: my-vpc
+  type: gcp-types/compute-v1:networks
+  properties:
+    name: myvpcname
+    autoCreateSubnetworks: false
+    routingConfig:
+      routingMode: REGIONAL
+
+- name: my-subnet
+  type: gcp-types/compute-v1:subnetworks
+  properties:
+    region: us-central1
+    network: $(ref.my-vpc.selfLink)
+    ipCidrRange: 192.168.1.0/24
+
+- name: my-gke-cluster
+  type: gcp-types/container-v1:projects.locations.clusters
+  properties:
+    parent: projects/stl-training/locations/us-central1
+    cluster:
+      name: my-cluster
+      initialNodeCount: 1
+      nodeConfig:
+        machineType: n1-standard-2
+        diskSizeGb: 100
+
+
+- name: my-sql-instance
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/n1-standard-1
+    disks:
+    - boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts
+    networkInterfaces:
+    - network: $(ref.my-vpc.selfLink)
+      subnetwork: $(ref.my-subnet.selfLink)
+      accessConfigs:
+      - name: External NAT
+        type: ONE_TO_ONE_NAT
+      networkIP: 192.168.1.2
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          #!/bin/bash
+          sudo apt-get update
+          sudo apt-get install -y mysql-server
+          sudo systemctl start mysql
+          sudo systemctl enable mysql
+          git clone https://github.com/Aniruth-Abhishek/demo.git
+          cd demo
+          sudo mysql -u root -p -e "CREATE USER 'user1'@'%' IDENTIFIED BY 'password@123';"
+          sudo mysql -u root -p -e "GRANT ALL PRIVILEGES ON *.* TO 'user1'@'%' WITH GRANT OPTION;"
+          sudo mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS stldb; GRANT ALL PRIVILEGES ON stldb.* TO 'user1'@'%' WITH GRANT OPTION;"
+          sudo mysql -u root -p -e "FLUSH PRIVILEGES;"
+          sudo mysql -u user1 -ppassword@123 -e "USE stldb; SOURCE fulldb17-11-2023-05-55.sql;"
+          exit
+
+- name: allow-http-https
+  type: compute.v1.firewall
+  properties:
+    network: $(ref.my-vpc.selfLink)
+    sourceRanges:
+    - 0.0.0.0/0
+    allowed:
+    - IPProtocol: TCP
+      ports:
+        - '20'
+        - '80'
+        - '22'
+        - '443'
